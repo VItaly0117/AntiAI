@@ -8,7 +8,7 @@
 
 Архітектура системи побудована за принципом клієнт-сервер з використанням драйвера режиму ядра та користувацьких компонентів. Основні шари архітектури:
 
-- **Kernel Layer**: Драйвер AntiAIKernel.sys (KMDF) створює пристрій `\Device\AntiAI` та символьне посилання `\DosDevices\AntiAI` для взаємодії з користувацьким режимом
+- **Kernel Layer**: Драйвер AntiAIKernel.sys (KMDF) створює пристрій `\Device\AntiAIKernel` та символьне посилання `\DosDevices\AntiAIKernel` для взаємодії з користувацьким режимом (шлях у користувацькому режимі: `\\.\AntiAIKernel`)
 - **User Layer**: Анти-AI сервіс (AntiAIService.exe) забезпечує періодичний опитування драйвера та логування стану через OutputDebugString
 - **Control Interface**: Утиліта AntiAIControl.exe надає інтерфейс для адміністрування через командний рядок
 - **Shared Layer**: Спільні заголовкові файли (antiai_policy.h, antiai_ioctl.h) визначають інтерфейс між драйвером та користувацькими компонентами
@@ -20,17 +20,23 @@
 ### 3.1 AntiAIKernel.sys
 
 Ядерний драйвер Windows (KMDF), що виконує такі функції:
-- Створення пристрою `\Device\AntiAI` та символьного посилання `\DosDevices\AntiAI`
-- Обробка IOCTL-запитів PING, SET_MODE, GET_MODE
+- Створення пристрою `\Device\AntiAIKernel` та символьного посилання `\DosDevices\AntiAIKernel`
+- Обробка IOCTL-запитів PING, GET_VERSION, GET_STATUS, SET_MODE, GET_MODE
 - Збереження поточного режиму роботи в пам'яті драйвера
+- Реалізація виявлення та блокування процесів fake_ai_tool.exe та ollama.exe через process_guard.c
 - Реєстрація в системі як стандартний драйвер без прихованої функціональності
 
 ### 3.2 AntiAIControl.exe
 
 Консольна утиліта адміністрування, що забезпечує:
 - Перевірку доступності драйвера (команда `ping`)
-- Встановлення режиму роботи драйвера (команда `set <mode>`)
-- Отримання поточного режиму драйвера (команда `get`)
+- Отримання версії драйвера (команда `version`)
+- Отримання статусу драйвера (команда `status`)
+- Тестування IOCTL інтерфейсу (команда `test`)
+- Встановлення режиму роботи драйвера (команда `mode off|audit|block-network|block-process|block-all`)
+- Додавання IP-адреси в блок-лист (команда `add-ip <IP>`)
+- Додавання домену в блок-лист (команда `add-domain <domain>`)
+- Очищення мережевих правил (команда `clear-network-rules`)
 
 ### 3.3 AntiAIService.exe
 
@@ -39,7 +45,15 @@
 - Логування поточного режиму та стану драйвера через OutputDebugString
 - Підтримка режиму роботи як Windows service або консольної програми
 
-### 3.4 Shared
+### 3.4 AntiAIWfp
+
+Користувацький модуль Windows Filtering Platform (WFP), що виконує функції:
+- Реалізація user-mode WFP API helper для мережевої фільтрації
+- Блокування мережевих з'єднань до AI-сервісів через WFP callout-функції
+- Управління блок-листом доменів та IP-адрес
+- Інтеграція з драйвером через IOCTL для синхронізації правил
+
+### 3.5 Shared
 
 Спільний модуль, що містить:
 - `antiai_ioctl.h`: визначення IOCTL кодів та структур даних
@@ -53,16 +67,16 @@
 Драйвер завантажений, але функції блокування відключені. Моніторинг не виконується.
 
 ### 4.2 AUDIT_ONLY (1)
-Режим лише аудиту без блокування. У поточній версії MVP цей режим встановлюється, але фактичне виявлення не реалізовано.
+Режим лише аудиту без блокування. Виявлення AI-сервісів та ML-процесів з логуванням без переривання діяльності.
 
 ### 4.3 BLOCK_NETWORK (2)
-Режим блокування мережевих з'єднань. У поточній версії MVP цей режим встановлюється, але фактичне WFP блокування не реалізовано.
+Режим блокування мережевих з'єднань. Блокування трафіку до AI-сервісів через user-mode WFP helper (AntiAIWfp). Локальні ML-процеси продовжують роботу.
 
 ### 4.4 BLOCK_PROCESS (3)
-Режим блокування локальних процесів. У поточній версії MVP цей режим встановлюється, але фактичне завершення процесів не реалізовано.
+Режим блокування локальних процесів. Переривання процесів fake_ai_tool.exe та ollama.exe через process_guard.c. Мережевий трафік не фільтрується.
 
 ### 4.5 BLOCK_ALL (4)
-Комплексний режим захисту. У поточній версії MVP цей режим встановлюється, але фактичне блокування не реалізовано.
+Комплексний режим захисту. Блокування мережевих з'єднань до AI-сервісів через WFP та блокування локальних ML-процесів.
 
 ## 5. IOCTL API
 
@@ -70,8 +84,10 @@
 
 ```c
 #define IOCTL_ANTIAI_PING CTL_CODE(FILE_DEVICE_UNKNOWN, 0x800, METHOD_BUFFERED, FILE_ANY_ACCESS)
-#define IOCTL_ANTIAI_SET_MODE CTL_CODE(FILE_DEVICE_UNKNOWN, 0x801, METHOD_BUFFERED, FILE_ANY_ACCESS)
-#define IOCTL_ANTIAI_GET_MODE CTL_CODE(FILE_DEVICE_UNKNOWN, 0x802, METHOD_BUFFERED, FILE_ANY_ACCESS)
+#define IOCTL_ANTIAI_GET_VERSION CTL_CODE(FILE_DEVICE_UNKNOWN, 0x801, METHOD_BUFFERED, FILE_ANY_ACCESS)
+#define IOCTL_ANTIAI_GET_STATUS CTL_CODE(FILE_DEVICE_UNKNOWN, 0x802, METHOD_BUFFERED, FILE_ANY_ACCESS)
+#define IOCTL_ANTIAI_SET_MODE CTL_CODE(FILE_DEVICE_UNKNOWN, 0x803, METHOD_BUFFERED, FILE_ANY_ACCESS)
+#define IOCTL_ANTIAI_GET_MODE CTL_CODE(FILE_DEVICE_UNKNOWN, 0x804, METHOD_BUFFERED, FILE_ANY_ACCESS)
 ```
 
 ### 5.1 IOCTL_ANTIAI_PING
@@ -81,7 +97,35 @@
 
 Вихідний буфер: відсутній
 
-### 5.2 IOCTL_ANTIAI_SET_MODE
+### 5.2 IOCTL_ANTIAI_GET_VERSION
+Призначення: отримання версії драйвера
+
+Вхідний буфер: відсутній
+
+Вихідний буфер:
+```c
+typedef struct _ANTI_AI_VERSION {
+    ULONG MajorVersion;
+    ULONG MinorVersion;
+    ULONG BuildNumber;
+} ANTI_AI_VERSION, *PANTI_AI_VERSION;
+```
+
+### 5.3 IOCTL_ANTIAI_GET_STATUS
+Призначення: отримання статусу драйвера
+
+Вхідний буфер: відсутній
+
+Вихідний буфер:
+```c
+typedef struct _ANTI_AI_STATUS {
+    ULONG CurrentMode;
+    ULONG DriverState;
+    ULONG Reserved[2];
+} ANTI_AI_STATUS, *PANTI_AI_STATUS;
+```
+
+### 5.4 IOCTL_ANTIAI_SET_MODE
 Призначення: встановлення режиму роботи драйвера
 
 Вхідний буфер:
@@ -93,7 +137,7 @@ typedef struct _ANTI_AI_MODE {
 
 Вихідний буфер: відсутній
 
-### 5.3 IOCTL_ANTIAI_GET_MODE
+### 5.5 IOCTL_ANTIAI_GET_MODE
 Призначення: отримання поточного режиму драйвера
 
 Вхідний буфер: відсутній
@@ -105,27 +149,40 @@ typedef struct _ANTI_AI_MODE {
 } ANTI_AI_MODE, *PANTI_AI_MODE;
 ```
 
-## 6. Мережеве блокування AI-сервісів через WFP (планується)
+## 6. Мережеве блокування AI-сервісів через WFP
 
-Мережеве блокування планується реалізувати через Windows Filtering Platform (WFP). У поточній версії MVP ця функціональність не реалізована.
+Мережеве блокування реалізовано через Windows Filtering Platform (WFP) як user-mode helper (AntiAIWfp), а не як kernel callout. Цей підхід забезпечує гнучкість та простоту розробки.
 
-Запланований алгоритм роботи:
-1. При ініціалізації драйвер створюватиме WFP сесію та додаватиме фільтри
-2. Кожна спроба з'єднання перехоплюватиметься callout-функцією
-3. Доменне ім'я або IP-адреса порівнюватиметься зі списком правил
-4. При збігу з'єднання блокуватиметься (повертатиметься FWP_ACTION_BLOCK)
-5. Подія логуватиметься в системний буфер
+Алгоритм роботи:
+1. Користувацький модуль AntiAIWfp ініціалізує WFP сесію та додає фільтри
+2. Кожна спроба з'єднання перехоплюється WFP callout-функцією
+3. Доменне ім'я або IP-адреса порівнюється зі списком правил
+4. При збігу з'єднання блокується (повертається FWP_ACTION_BLOCK)
+5. Подія логується через OutputDebugString
 
-## 7. Локальне виявлення ML-процесів через process creation callback (планується)
+Список AI-сервісів за замовчуванням:
+- api.openai.com
+- anthropic.com
+- cohere.com
+- huggingface.co
+- replicate.com
+- together.ai
+- mistral.ai
 
-Для виявлення локальних ML-процесів планується використовувати callback-функцію моніторингу створення процесів (PsSetCreateProcessNotifyRoutineEx). У поточній версії MVP ця функціональність не реалізована.
+## 7. Локальне виявлення ML-процесів через process creation callback
 
-Запланований алгоритм роботи:
-1. При завантаженні драйвер реєструватиме callback-функцію
-2. При створенні нового процесу викликатиметься callback
-3. Ім'я процесу порівнюватиметься зі списком відомих ML-фреймворків
-4. При виявленні ML-процесу в залежності від режиму виконуватимуться відповідні дії
-5. Подія логуватиметься з деталями (PID, ім'я, шлях)
+Для виявлення локальних ML-процесів драйвер використовує callback-функцію моніторингу створення процесів (PsSetCreateProcessNotifyRoutineEx), реалізовану в process_guard.c.
+
+Алгоритм роботи:
+1. При завантаженні драйвер реєструє callback-функцію
+2. При створенні нового процесу викликається callback
+3. Ім'я процесу порівнюється зі списком відомих AI-інструментів:
+   - fake_ai_tool.exe
+   - ollama.exe
+4. При виявленні ML-процесу в залежності від режиму:
+   - AUDIT_ONLY: логування події
+   - BLOCK_PROCESS або BLOCK_ALL: переривання процесу через ZwTerminateProcess
+5. Подія логується з деталями (PID, ім'я, шлях)
 
 ## 8. Як зібрати
 
@@ -203,14 +260,59 @@ sc query AntiAIKernel
 AntiAIControl.exe ping
 ```
 
-Встановлення режиму AUDIT_ONLY:
+Отримання версії драйвера:
 ```cmd
-AntiAIControl.exe set 1
+AntiAIControl.exe version
 ```
 
-Отримання поточного режиму:
+Отримання статусу драйвера:
 ```cmd
-AntiAIControl.exe get
+AntiAIControl.exe status
+```
+
+Тестування IOCTL інтерфейсу:
+```cmd
+AntiAIControl.exe test
+```
+
+Встановлення режиму AUDIT_ONLY:
+```cmd
+AntiAIControl.exe mode audit
+```
+
+Встановлення режиму BLOCK_NETWORK:
+```cmd
+AntiAIControl.exe mode block-network
+```
+
+Встановлення режиму BLOCK_PROCESS:
+```cmd
+AntiAIControl.exe mode block-process
+```
+
+Встановлення режиму BLOCK_ALL:
+```cmd
+AntiAIControl.exe mode block-all
+```
+
+Встановлення режиму OFF:
+```cmd
+AntiAIControl.exe mode off
+```
+
+Додавання IP-адреси в блок-лист:
+```cmd
+AntiAIControl.exe add-ip 1.2.3.4
+```
+
+Додавання домену в блок-лист:
+```cmd
+AntiAIControl.exe add-domain example.com
+```
+
+Очищення мережевих правил:
+```cmd
+AntiAIControl.exe clear-network-rules
 ```
 
 ### 10.3 Перевірка роботи AntiAIService
@@ -226,12 +328,11 @@ AntiAIService.exe console
 
 Поточна версія MVP має наступні обмеження:
 
-- **IOCTL інтерфейс**: реалізовано лише PING, SET_MODE, GET_MODE; ADD_RULE, REMOVE_RULE, GET_LOG не реалізовано
-- **Мережеве блокування**: WFP інтеграція не реалізована; мережевий трафік не фільтрується
-- **Виявлення процесів**: PsSetCreateProcessNotifyRoutineEx не реалізовано; моніторинг процесів не виконується
-- **Завершення процесів**: реальне завершення ML-процесів не реалізовано
-- **Логування**: відсутній системний буфер логів; логування виконується лише через OutputDebugString в AntiAIService
-- **Правила блокування**: механізм додавання/видалення правил не реалізовано
+- **IOCTL інтерфейс**: реалізовано PING, GET_VERSION, GET_STATUS, SET_MODE, GET_MODE; ADD_RULE, REMOVE_RULE, GET_LOG не реалізовано
+- **Виявлення процесів**: реалізовано лише для fake_ai_tool.exe та ollama.exe; розширення списку ML-фреймворків не реалізовано
+- **Мережеве блокування**: реалізовано як user-mode WFP helper (AntiAIWfp), а не як kernel callout
+- **Логування**: відсутній системний буфер логів; логування виконується через OutputDebugString в AntiAIService
+- **Правила блокування**: механізм додавання/видалення правил через IOCTL не реалізовано; управління правилами виконується через AntiAIControl
 - **Платформа**: підтримка тільки x64 Windows 10/11
 
 ## 12. Безпека
@@ -242,7 +343,7 @@ AntiAIService.exe console
 - Драйвер не приховує своє присутність в системі
 - Відображається в списку драйверів (driverquery)
 - Відсутні техніки rootkit (DKOM, SSDT hooking, inline hooking)
-- Пристрій `\Device\AntiAI` та символьне посилання `\DosDevices\AntiAI` створюються відкрито
+- Пристрій `\Device\AntiAIKernel` та символьне посилання `\DosDevices\AntiAIKernel` створюються відкрито
 
 ### 12.2 Відсутність інжектів
 - Драйвер не виконує код-інжекцію в користувацькі процеси
@@ -269,23 +370,23 @@ AntiAIService.exe console
 
 Плани розвитку проекту включають:
 
-### 13.1 Реалізація мережевої фільтрації через WFP
-- Інтеграція з Windows Filtering Platform
-- Реєстрація callout-функцій на рівні FWPM_LAYER_ALE_AUTH_CONNECT_V4/V6
-- Блокування трафіку до відомих AI-сервісів (api.openai.com, anthropic.com, тощо)
-- Логування заблокованих з'єднань
+### 13.1 Розширення списку виявлення ML-процесів
+- Додавання підтримки інших AI-інструментів та ML-фреймворків
+- Аналіз завантажених DLL для виявлення ML-бібліотек
+- Моніторинг використання GPU (CUDA, DirectML)
+- Виявлення характерних патернів поведінки ML-процесів
 
-### 13.2 Реалізація виявлення ML-процесів
-- Реєстрація PsSetCreateProcessNotifyRoutineEx callback
-- Виявлення процесів, що використовують ML-фреймворки (TensorFlow, PyTorch, тощо)
-- Реалізація завершення процесів у режимі BLOCK_PROCESS та BLOCK_ALL
-- Логування виявлених ML-процесів
+### 13.2 Покращення мережевої фільтрації
+- Динамічне оновлення списку AI-сервісів
+- Виявлення спроб обходу через проксі/VPN
+- Фільтрація TLS-трафіку з розпізнаванням SNI
+- Інтеграція з системними брандмауерами
 
 ### 13.3 Розширення IOCTL інтерфейсу
 - Реалізація IOCTL_ANTIAI_ADD_RULE для додавання правил блокування
 - Реалізація IOCTL_ANTIAI_REMOVE_RULE для видалення правил
 - Реалізація IOCTL_ANTIAI_GET_LOG для отримання журналу подій
-- Додавання структури ANTI_AI_STATUS для отримання статистики
+- Розширення структури ANTI_AI_STATUS для отримання детальної статистики
 
 ### 13.4 Покращення логування
 - Реалізація системного буфера логів в драйвері
