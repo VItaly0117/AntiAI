@@ -119,12 +119,12 @@ static BOOLEAN AntiAIImageMatchesDemoDenylist(_In_ PCUNICODE_STRING image)
     RtlInitUnicodeString(&uFake, L"fake_ai_tool.exe");
     RtlInitUnicodeString(&uOllama, L"ollama.exe");
 
-    if (AntiAIRtlSuffixUnicodeStringCi(image, &uPython))
+    if (AntiAIImageUnderSystemDirs(image))
     {
         return FALSE;
     }
 
-    if (AntiAIImageUnderSystemDirs(image))
+    if (AntiAIRtlSuffixUnicodeStringCi(image, &uPython))
     {
         return FALSE;
     }
