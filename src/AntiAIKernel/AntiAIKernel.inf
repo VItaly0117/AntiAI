@@ -1,0 +1,61 @@
+;
+; AntiAIKernel.inf — root-enumerated KMDF driver (educational).
+;
+
+[Version]
+Signature   = "$WINDOWS NT$"
+Class       = System
+ClassGuid   = {4d36e97d-e325-11ce-bfc1-08002be10318}
+Provider    = %ManufacturerName%
+DriverVer   = 05/14/2026,1.0.0.0
+CatalogFile = AntiAIKernel.cat
+PnpLockdown = 1
+
+[DestinationDirs]
+DefaultDestDir = 13
+
+[SourceDisksNames]
+1 = %DiskName%,,,""
+
+[SourceDisksFiles]
+AntiAIKernel.sys = 1,,
+
+;*****************************************
+; Install
+;*****************************************
+
+[Manufacturer]
+%ManufacturerName% = Standard,NTamd64
+
+[Standard.NTamd64]
+%AntiAIKernel.DeviceDesc% = AntiAIKernel_Device, Root\AntiAIKernel
+
+[AntiAIKernel_Device.NT]
+CopyFiles = File_Copy
+
+[File_Copy]
+AntiAIKernel.sys
+
+;-------------- Service installation
+[AntiAIKernel_Device.NT.Services]
+AddService = AntiAIKernel, %SPSVCINST_ASSOCSERVICE%, AntiAIKernel_Service_Inst
+
+[AntiAIKernel_Service_Inst]
+DisplayName    = %AntiAIKernel.SVCDESC%
+ServiceType    = 1
+StartType      = 3
+ErrorControl   = 1
+ServiceBinary  = %13%\AntiAIKernel.sys
+
+[AntiAIKernel_Device.NT.Wdf]
+KmdfService = AntiAIKernel, AntiAIKernel_wdfsect
+
+[AntiAIKernel_wdfsect]
+KmdfLibraryVersion = $KMDFVERSION$
+
+[Strings]
+SPSVCINST_ASSOCSERVICE = 0x00000002
+ManufacturerName       = "AntiAI (Educational)"
+DiskName                 = "AntiAI Kernel Driver Disk"
+AntiAIKernel.DeviceDesc  = "AntiAI Kernel Mode Driver"
+AntiAIKernel.SVCDESC     = "AntiAI Kernel Driver Service"

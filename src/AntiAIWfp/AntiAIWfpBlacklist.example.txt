@@ -1,0 +1,9 @@
+# Optional WFP IPv4/IPv6 blacklist (one address per line).
+# Copy next to AntiAIService.exe as AntiAIWfpBlacklist.txt (same folder as the service binary).
+# Lines starting with # are ignored.
+#
+# Example (lab only — chatgpt.com uses many IPs/CDN edges; blocking one rarely blocks the product):
+# 1) nslookup chatgpt.com
+# 2) Paste one AAAA or A record below, then restart the service (or use AntiAIControl.exe wfp add ...).
+#
+# 104.18.32.47

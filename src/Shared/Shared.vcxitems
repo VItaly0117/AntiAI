@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClInclude Include="$(MSBuildThisFileDirectory)include\antiai_ioctl.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)include\antiai_policy.h" />
+  </ItemGroup>
+</Project>
