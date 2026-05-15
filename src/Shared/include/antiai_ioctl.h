@@ -16,7 +16,7 @@
 #endif
 
 /* Vendor-defined device type (custom range; avoid well-known FILE_DEVICE_* collisions). */
-#define ANTIAI_DEVICE_TYPE 0x8100
+#define ANTIAI_DEVICE_TYPE 0x8100u
 
 #define ANTIAI_CTL_CODE(Function) \
     CTL_CODE(ANTIAI_DEVICE_TYPE, (Function), METHOD_BUFFERED, FILE_ANY_ACCESS)

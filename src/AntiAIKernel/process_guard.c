@@ -102,11 +102,42 @@ static BOOLEAN AntiAIImageUnderSystemDirs(_In_ PCUNICODE_STRING image)
     return FALSE;
 }
 
-static BOOLEAN AntiAIRtlSuffixUnicodeStringCi(
-    _In_ PCUNICODE_STRING string,
-    _In_ PCUNICODE_STRING suffix)
+static BOOLEAN AntiAIImageFileNameEqualsCi(
+    _In_ PCUNICODE_STRING image,
+    _In_ PCUNICODE_STRING fileName)
 {
-    return RtlSuffixUnicodeString((PUNICODE_STRING)string, (PUNICODE_STRING)suffix, TRUE) == STATUS_SUCCESS;
+    UNICODE_STRING tail;
+    USHORT tailOffsetCch;
+    WCHAR previous;
+
+    if (image == NULL ||
+        image->Buffer == NULL ||
+        fileName == NULL ||
+        fileName->Buffer == NULL ||
+        fileName->Length == 0 ||
+        image->Length < fileName->Length ||
+        ((image->Length - fileName->Length) % sizeof(WCHAR)) != 0)
+    {
+        return FALSE;
+    }
+
+    tailOffsetCch = (USHORT)((image->Length - fileName->Length) / sizeof(WCHAR));
+    tail.Buffer = image->Buffer + tailOffsetCch;
+    tail.Length = fileName->Length;
+    tail.MaximumLength = fileName->Length;
+
+    if (!RtlEqualUnicodeString(&tail, fileName, TRUE))
+    {
+        return FALSE;
+    }
+
+    if (image->Length == fileName->Length)
+    {
+        return TRUE;
+    }
+
+    previous = image->Buffer[tailOffsetCch - 1];
+    return (previous == L'\\' || previous == L'/');
 }
 
 static BOOLEAN AntiAIImageMatchesDemoDenylist(_In_ PCUNICODE_STRING image)
@@ -124,17 +155,17 @@ static BOOLEAN AntiAIImageMatchesDemoDenylist(_In_ PCUNICODE_STRING image)
         return FALSE;
     }
 
-    if (AntiAIRtlSuffixUnicodeStringCi(image, &uPython))
+    if (AntiAIImageFileNameEqualsCi(image, &uPython))
     {
         return FALSE;
     }
 
-    if (AntiAIRtlSuffixUnicodeStringCi(image, &uFake))
+    if (AntiAIImageFileNameEqualsCi(image, &uFake))
     {
         return TRUE;
     }
 
-    if (AntiAIRtlSuffixUnicodeStringCi(image, &uOllama))
+    if (AntiAIImageFileNameEqualsCi(image, &uOllama))
     {
         return TRUE;
     }

@@ -13,8 +13,8 @@
  *
  * POLICY (MVP):
  *   - OFF / BLOCK_NETWORK: callback returns immediately (no process deny in this module).
- *   - AUDIT_ONLY: if image tail matches demo denylist, KdPrintEx only (never deny).
- *   - BLOCK_PROCESS / BLOCK_ALL: deny creation for image tail fake_ai_tool.exe or ollama.exe.
+ *   - AUDIT_ONLY: if exact image filename matches demo denylist, KdPrintEx only (never deny).
+ *   - BLOCK_PROCESS / BLOCK_ALL: deny creation for exact image filename fake_ai_tool.exe or ollama.exe.
  *   - python.exe is never blocked or audit-logged here.
  *   - Paths under \\Windows\\System32\\ and \\Windows\\SysWOW64\\ are ignored (system churn).
  *

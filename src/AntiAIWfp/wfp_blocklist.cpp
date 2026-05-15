@@ -59,6 +59,24 @@ HANDLE g_engine = nullptr;
 bool g_wsaStarted = false;
 std::vector<GUID> g_filterKeys;
 
+static bool GuidEquals(const GUID &a, const GUID &b)
+{
+    return std::memcmp(&a, &b, sizeof(GUID)) == 0;
+}
+
+static void AddUniqueGuid(std::vector<GUID> &keys, const GUID &key)
+{
+    const auto it = std::find_if(
+        keys.begin(),
+        keys.end(),
+        [&key](const GUID &existing) { return GuidEquals(existing, key); });
+
+    if (it == keys.end())
+    {
+        keys.push_back(key);
+    }
+}
+
 static void TrimInPlace(std::wstring &s)
 {
     while (!s.empty() && std::iswspace(static_cast<wint_t>(s.front())))
@@ -90,7 +108,7 @@ static HRESULT EnsureProviderAndSublayer(HANDLE engine)
     sublayer.displayData.name = const_cast<PWSTR>(L"AntiAI educational sublayer");
     sublayer.displayData.description =
         const_cast<PWSTR>(L"Hosts block filters for ALE_AUTH_CONNECT_* layers");
-    sublayer.providerKey = ANTI_AI_WFP_PROVIDER_KEY;
+    sublayer.providerKey = const_cast<GUID *>(&ANTI_AI_WFP_PROVIDER_KEY);
     sublayer.weight = 0x100;
 
     err = FwpmSubLayerAdd0(engine, &sublayer, nullptr);
@@ -189,7 +207,7 @@ static HRESULT AddBlockedIpLocked(PCWSTR ipText)
         cond.fieldKey = FWPM_CONDITION_IP_REMOTE_ADDRESS;
         cond.matchType = FWP_MATCH_EQUAL;
         cond.conditionValue.type = FWP_UINT32;
-        cond.conditionValue.uint32 = v4.S_un.S_addr;
+        cond.conditionValue.uint32 = ntohl(v4.S_un.S_addr);
     }
     else
     {
@@ -210,6 +228,7 @@ static HRESULT AddBlockedIpLocked(PCWSTR ipText)
     filter.displayData.name = displayNameBuf.data();
     filter.displayData.description =
         const_cast<PWSTR>(L"Educational deny on ALE_AUTH_CONNECT_* (remote IP equality)");
+    filter.providerKey = const_cast<GUID *>(&ANTI_AI_WFP_PROVIDER_KEY);
     filter.layerKey = isV4 ? FWPM_LAYER_ALE_AUTH_CONNECT_V4 : FWPM_LAYER_ALE_AUTH_CONNECT_V6;
     filter.subLayerKey = ANTI_AI_WFP_SUBLAYER_KEY;
     filter.weight.type = FWP_UINT8;
@@ -244,15 +263,54 @@ static HRESULT AddBlockedIpLocked(PCWSTR ipText)
 
 static void ClearBlockedIpsLocked()
 {
+    std::vector<GUID> keysToDelete = g_filterKeys;
+
     if (g_engine == nullptr)
     {
         g_filterKeys.clear();
         return;
     }
 
-    for (const GUID &key : g_filterKeys)
+    HANDLE enumHandle = nullptr;
+    DWORD err = FwpmFilterCreateEnumHandle0(g_engine, nullptr, &enumHandle);
+    if (err == ERROR_SUCCESS)
     {
-        DWORD err = FwpmTransactionBegin0(g_engine, 0);
+        for (;;)
+        {
+            FWPM_FILTER0 **entries = nullptr;
+            UINT32 count = 0;
+
+            err = FwpmFilterEnum0(g_engine, enumHandle, 64, &entries, &count);
+            if (err != ERROR_SUCCESS)
+            {
+                break;
+            }
+
+            for (UINT32 i = 0; i < count; ++i)
+            {
+                if (entries[i] != nullptr && GuidEquals(entries[i]->subLayerKey, ANTI_AI_WFP_SUBLAYER_KEY))
+                {
+                    AddUniqueGuid(keysToDelete, entries[i]->filterKey);
+                }
+            }
+
+            if (entries != nullptr)
+            {
+                FwpmFreeMemory0(reinterpret_cast<void **>(&entries));
+            }
+
+            if (count == 0)
+            {
+                break;
+            }
+        }
+
+        FwpmFilterDestroyEnumHandle0(g_engine, enumHandle);
+    }
+
+    for (const GUID &key : keysToDelete)
+    {
+        err = FwpmTransactionBegin0(g_engine, 0);
         if (err != ERROR_SUCCESS)
         {
             continue;
@@ -351,6 +409,10 @@ HRESULT WfpAddBlockedIp(PCWSTR ipText)
 void WfpClearBlockedIps(void)
 {
     std::lock_guard<std::recursive_mutex> guard(g_lock);
+    if (FAILED(OpenEngineAndInstallPrimitivesLocked()))
+    {
+        return;
+    }
     ClearBlockedIpsLocked();
 }
 

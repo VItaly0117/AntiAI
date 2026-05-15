@@ -271,11 +271,8 @@ AntiAIEvtIoDeviceControl(
         out->Reserved1 = 0;
 
         /*
-         * FUTURE (BLOCK_NETWORK): set capability bits in out->Flags when a
-         * Windows Filtering Platform (WFP) callout / sublayer is registered.
-         *   Typical integration: FWPM* / Fwps* in a dedicated module; start/stop
-         *   when PolicyMode transitions into/out of modes that require network
-         *   enforcement. Keep audit-only vs block semantics explicit.
+         * Network blocking is handled by the user-mode AntiAIWfp helper for this
+         * MVP. The kernel status path only reports the current policy mode.
          */
 
         /*
@@ -329,10 +326,8 @@ AntiAIEvtIoDeviceControl(
         ProcessGuardSetPolicyMode(ctx->Mode);
 
         /*
-         * FUTURE (BLOCK_NETWORK): if transitioning into a mode that requires
-         * network enforcement, enable the WFP module here (or schedule a passive
-         * worker). If leaving those modes, tear down callouts and filters.
-         *   Do not add stealth filtering; keep explicit policy and logging.
+         * Network policy is applied by AntiAIControl/AntiAIService through the
+         * user-mode WFP helper; SET_MODE does not install kernel network hooks.
          */
 
         /* Process creation policy is applied in process_guard.c (notify routine). */
